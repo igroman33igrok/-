@@ -14,47 +14,37 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import org.jsoup.Jsoup
 
 class MangaViewModel(
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    // ✅ ДОБАВЛЕНО: Флаг кэширования изображений
-    var imageCachingEnabled = true
-
-    // ---------- КЭШ ИЗОБРАЖЕНИЙ ----------
-    private val imageCache = LruCache<String, String>(100)
-
-    private val altDomains = listOf(
-        "https://telegra.ph",
-        "https://graph.org",
-        "https://te.legra.ph"
-    )
-
-    // ---------- FIRESTORE ----------
+    // =====================================================
+    // FIRESTORE
+    // =====================================================
     private val db: FirebaseFirestore = FirebaseFirestore.getInstance().apply {
         try {
             firestoreSettings = FirebaseFirestoreSettings.Builder()
                 .setPersistenceEnabled(true)
                 .build()
         } catch (e: Exception) {
-            Log.w("MangaViewModel", "Persistence error: ${e.message}")
+            Log.w("MangaVM", "Firestore persistence error")
         }
     }
 
     private val pageSize = 10
 
-    // ---------- STATE ----------
     private val _mangaList = MutableStateFlow<List<Manga>>(emptyList())
     val mangaList: StateFlow<List<Manga>> = _mangaList
+
+    val currentPageFlow = MutableStateFlow(1)
+    val hasNextPageFlow = MutableStateFlow(true)
+    val errorFlow = MutableStateFlow<String?>(null)
 
     private var currentCategory: String
         get() = savedStateHandle["category"] ?: ""
         set(value) { savedStateHandle["category"] = value }
-
-    private var currentSearch: String
-        get() = savedStateHandle["search"] ?: ""
-        set(value) { savedStateHandle["search"] = value }
 
     private var currentPage: Int
         get() = savedStateHandle["page"] ?: 0
@@ -62,41 +52,25 @@ class MangaViewModel(
 
     private val pageSnapshots = mutableListOf<DocumentSnapshot?>()
 
-    val currentPageFlow = MutableStateFlow(currentPage + 1)
-    val hasNextPageFlow = MutableStateFlow(true)
-    val errorFlow = MutableStateFlow<String?>(null)
-    val isLoadingFlow = MutableStateFlow(false)
-
-    // =========================================================
-    // 🔹 ЗАГРУЗКА СТРАНИЦЫ
-    // =========================================================
+    // =====================================================
+    // ЗАГРУЗКА СПИСКА МАНГ
+    // =====================================================
     fun loadMangaPage(category: String, search: String, page: Int) {
         viewModelScope.launch {
-            isLoadingFlow.value = true
-
-            if (category != currentCategory || search != currentSearch) {
-                currentCategory = category
-                currentSearch = search
-                currentPage = 0
-                pageSnapshots.clear()
-                _mangaList.value = emptyList()
-                currentPageFlow.value = 1
-                hasNextPageFlow.value = true
-            } else {
-                currentPage = page
-            }
-
             try {
+                if (category != currentCategory) {
+                    currentCategory = category
+                    currentPage = 0
+                    pageSnapshots.clear()
+                    _mangaList.value = emptyList()
+                } else {
+                    currentPage = page
+                }
+
                 var query = db.collection("manga")
                     .whereEqualTo("category", currentCategory)
                     .orderBy("title")
                     .limit(pageSize.toLong())
-
-                if (currentSearch.isNotBlank()) {
-                    query = query
-                        .whereGreaterThanOrEqualTo("title", currentSearch)
-                        .whereLessThanOrEqualTo("title", currentSearch + '\uf8ff')
-                }
 
                 if (currentPage > 0 && pageSnapshots.size >= currentPage) {
                     pageSnapshots[currentPage - 1]?.let {
@@ -104,7 +78,7 @@ class MangaViewModel(
                     }
                 }
 
-                val result = withTimeout(8000) { query.get().await() }
+                val result = query.get().await()
                 val docs = result.documents
 
                 hasNextPageFlow.value = docs.size >= pageSize
@@ -114,143 +88,122 @@ class MangaViewModel(
                         pageSnapshots.add(docs.last())
                     }
 
-                    val base = docs.mapNotNull {
+                    _mangaList.value = docs.mapNotNull {
+                        val title = it.getString("title") ?: return@mapNotNull null
+                        val link = it.getString("link") ?: return@mapNotNull null
+                        val category = it.getString("category") ?: ""
+                        val imageUrl = it.getString("imageUrl") ?: ""
+
                         Manga(
-                            it.getString("title") ?: return@mapNotNull null,
-                            it.getString("link") ?: return@mapNotNull null,
-                            it.getString("category") ?: "",
-                            ""
+                            title = title,
+                            link = link,
+                            category = category,
+                            imageUrl = imageUrl
                         )
                     }
 
-                    _mangaList.value = base
                     currentPageFlow.value = currentPage + 1
-
-                    if (hasNextPageFlow.value) {
-                        preloadNextPage()
-                    }
-
-                    // ✅ Используем imageCachingEnabled
-                    if (imageCachingEnabled) {
-                        preloadAllImages(base)
-                    }
-                } else {
-                    hasNextPageFlow.value = false
                 }
 
             } catch (e: Exception) {
-                errorFlow.value = "Ошибка загрузки: ${e.message}"
-                Log.e("MangaViewModel", "loadMangaPage", e)
-            } finally {
-                isLoadingFlow.value = false
+                errorFlow.value = "Ошибка загрузки"
+                Log.e("MangaVM", "loadMangaPage", e)
             }
         }
     }
 
-    // =========================================================
-    // 🔹 ПРЕДЗАГРУЗКА СЛЕДУЮЩЕЙ СТРАНИЦЫ
-    // =========================================================
-    private fun preloadNextPage() {
-        viewModelScope.launch {
-            try {
-                val nextPage = currentPage + 1
-                var query = db.collection("manga")
-                    .whereEqualTo("category", currentCategory)
-                    .orderBy("title")
-                    .limit(pageSize.toLong())
-
-                if (currentSearch.isNotBlank()) {
-                    query = query
-                        .whereGreaterThanOrEqualTo("title", currentSearch)
-                        .whereLessThanOrEqualTo("title", currentSearch + '\uf8ff')
-                }
-
-                pageSnapshots.getOrNull(nextPage - 1)?.let {
-                    query = query.startAfter(it)
-                }
-
-                query.get().await()
-            } catch (e: Exception) {
-                Log.w("MangaViewModel", "Preload failed: ${e.message}")
-            }
-        }
-    }
-
-    // =========================================================
-    // 🔹 ПЕРЕКЛЮЧЕНИЕ СТРАНИЦ
-    // =========================================================
-    fun nextPage() {
-        if (!hasNextPageFlow.value || isLoadingFlow.value) return
-
-        val page = currentPage + 1
-        currentPage = page
-        currentPageFlow.value = page + 1
-
-        loadMangaPage(
-            category = currentCategory,
-            search = currentSearch,
-            page = page
-        )
-    }
-
+    // =====================================================
+    // НАВИГАЦИЯ ПО СТРАНИЦАМ
+    // =====================================================
     fun prevPage() {
-        if (currentPage <= 0 || isLoadingFlow.value) return
-
-        val page = currentPage - 1
-        currentPage = page
-        currentPageFlow.value = page + 1
-
-        loadMangaPage(
-            category = currentCategory,
-            search = currentSearch,
-            page = page
-        )
-    }
-
-    // =========================================================
-    // 🔹 ЗАГРУЗКА ИЗОБРАЖЕНИЙ
-    // =========================================================
-    private fun preloadAllImages(list: List<Manga>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val withImages = list.map { manga ->
-                async {
-                    val img = fetchFirstImageWithFallback(manga.link) ?: ""
-                    manga.copy(imageUrl = img)
-                }
-            }.awaitAll()
-
-            _mangaList.value = withImages
-            preloadNextImages(withImages)
+        if (currentPage > 0) {
+            currentPage--
+            currentPageFlow.value = currentPage + 1 // Для отображения (начиная с 1)
+            loadMangaPage(currentCategory, "", currentPage)
         }
     }
 
-    private suspend fun fetchFirstImageWithFallback(link: String): String? = withContext(Dispatchers.IO) {
-        imageCache.get(link)?.let { return@withContext it }
+    fun nextPage() {
+        if (hasNextPageFlow.value) {
+            currentPage++
+            currentPageFlow.value = currentPage + 1 // Для отображения (начиная с 1)
+            loadMangaPage(currentCategory, "", currentPage)
+        }
+    }
 
-        altDomains.forEach { domain ->
+    // =====================================================
+    // ЗАГРУЗКА ОБЛОЖЕК
+    // =====================================================
+    fun loadCoverForManga(manga: Manga, onCoverLoaded: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                val modifiedLink = link.replace("https://telegra.ph", domain)
-                val connection = java.net.URL(modifiedLink).openConnection()
-                connection.connectTimeout = 3000
-                connection.readTimeout = 5000
+                if (manga.imageUrl.isNotBlank()) {
+                    onCoverLoaded(manga.imageUrl)
+                    return@launch
+                }
 
-                val doc = org.jsoup.Jsoup.parse(connection.getInputStream(), "UTF-8", modifiedLink)
-                val img = doc.selectFirst("img[src]")?.absUrl("src")
-                img?.let {
-                    imageCache.put(link, it)
-                    return@withContext it
+                // Парсим страницу для получения обложки
+                val doc = Jsoup.connect(manga.link)
+                    .timeout(8000)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .get()
+
+                // Ищем первую подходящую картинку
+                val coverUrl = doc.select("img[src]")
+                    .firstOrNull { img ->
+                        val src = img.absUrl("src")
+                        // Фильтруем по размеру и типу
+                        src.contains("jpg", ignoreCase = true) ||
+                        src.contains("png", ignoreCase = true) ||
+                        src.contains("jpeg", ignoreCase = true)
+                    }
+                    ?.absUrl("src")
+                    ?: ""
+
+                if (coverUrl.isNotBlank()) {
+                    onCoverLoaded(coverUrl)
+                    // Можно сохранить в Firestore для будущих загрузок
+                    try {
+                        db.collection("manga")
+                            .whereEqualTo("link", manga.link)
+                            .get()
+                            .addOnSuccessListener { docs ->
+                                docs.documents.firstOrNull()?.reference?.update("imageUrl", coverUrl)
+                            }
+                    } catch (e: Exception) {
+                        Log.w("MangaVM", "Failed to save cover to Firestore", e)
+                    }
                 }
             } catch (e: Exception) {
-                Log.w("MangaViewModel", "Failed to load from $domain: ${e.message}")
+                Log.w("MangaVM", "Failed to load cover for ${manga.title}", e)
             }
         }
-        null
     }
 
-    private fun preloadNextImages(list: List<Manga>) {
-        val next = list.takeLast(5).map { it.link }
-        viewModelScope.launch(Dispatchers.IO) {
-            next.forEach { fetchFirstImageWithFallback(it) }
+    // =====================================================
+    // 🔥 ГЛАВНОЕ: ЗАГРУЗКА МАНГИ ПО ЧАСТЯМ
+    // =====================================================
+    suspend fun parseMangaImagesByParts(
+        link: String,
+        initialCount: Int = 3
+    ): Pair<List<String>, List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val doc = Jsoup.connect(link)
+                .timeout(8000)
+                .userAgent("Mozilla/5.0")
+                .get()
+
+            val images = doc.select("img[src]")
+                .mapNotNull { it.absUrl("src") }
+                .filter { it.isNotBlank() }
+
+            val first = images.take(initialCount)
+            val rest = images.drop(initialCount)
+
+            Pair(first, rest)
+        } catch (e: Exception) {
+            Log.e("MangaVM", "parse error", e)
+            Pair(emptyList(), emptyList())
         }
     }
 }

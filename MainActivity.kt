@@ -120,7 +120,7 @@ fun MyApp(activity: Activity) {
 }
 
 @Composable
-fun AppEntryPoint(context: Context) {
+fun AppEntryPoint(activity: Activity) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
     val scope = rememberCoroutineScope()
@@ -130,14 +130,14 @@ fun AppEntryPoint(context: Context) {
 
     // Проверка принятия дисклеймера
     LaunchedEffect(Unit) {
-        disclaimerAccepted = UserPrefs.isDisclaimerAccepted(context).first()
+        disclaimerAccepted = UserPrefs.isDisclaimerAccepted(activity).first()
         disclaimerChecked = true
     }
 
     if (!disclaimerChecked) return
 
     if (!disclaimerAccepted) {
-        DisclaimerScreen(context = context) {
+        DisclaimerScreen(context = activity) {
             disclaimerAccepted = true
         }
         return
@@ -170,7 +170,7 @@ fun AppEntryPoint(context: Context) {
     } else {
         LoginScreen(
             onSuccess = { loggedIn = true },
-            context = context
+            context = activity
         )
     }
 }
@@ -276,8 +276,9 @@ fun MainAppScreen(
                 composable("manga") {
                     MangaListScreen(
                         onOpenLink = { link ->
-                            navSharedViewModel.setUrl(link)
-                            navController.navigate("webview")
+                            // Кодируем URL для безопасной передачи в параметрах
+                            val encodedUrl = java.net.URLEncoder.encode(link, "UTF-8")
+                            navController.navigate("reader/$encodedUrl")
                         },
                         viewModel = mangaViewModel  // ✅ Передаём тот же ViewModel
                     )
@@ -287,8 +288,8 @@ fun MainAppScreen(
                 composable("favorites") {
                     FavoriteScreen(
                         onOpenLink = { link ->
-                            navSharedViewModel.setUrl(link)
-                            navController.navigate("webview")
+                            val encodedUrl = java.net.URLEncoder.encode(link, "UTF-8")
+                            navController.navigate("reader/$encodedUrl")
                         }
                     )
                 }
@@ -307,10 +308,13 @@ fun MainAppScreen(
                     SettingsScreen(isDarkTheme, onThemeChanged)
                 }
 
-                // --- WebView ---
-                composable("webview") {
-                    WebViewScreen(navSharedViewModel)
+                // --- Manga Reader ---
+                composable("reader/{url}") {
+                    val encoded = it.arguments?.getString("url") ?: ""
+                    val link = java.net.URLDecoder.decode(encoded, "UTF-8")
+                    MangaReadScreen(link)
                 }
+
             }
         }
     }

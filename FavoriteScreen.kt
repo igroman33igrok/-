@@ -59,7 +59,11 @@ fun FavoriteScreen(onOpenLink: (String) -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(8.dp)
-                            .clickable { onOpenLink(manga.link) }
+                            .clickable {
+                                if (manga.link.isNotBlank()) {
+                                    onOpenLink(manga.link)
+                                }
+                            }
                     ) {
                         Row(
                             modifier = Modifier
