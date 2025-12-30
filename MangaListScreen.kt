@@ -8,14 +8,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.animation.core.*
+import kotlin.random.Random
 import coil.compose.AsyncImage
 import com.example.shotacon.model.Manga
 import com.example.shotacon.viewmodel.MangaViewModel
@@ -23,6 +27,99 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+
+// 🎄 Новогодние украшения
+@Composable
+fun Snowflakes() {
+    val snowflakes = remember { List(15) { SnowflakeData() } }
+
+    snowflakes.forEach { snowflake ->
+        SnowflakeItem(snowflake)
+    }
+}
+
+data class SnowflakeData(
+    val id: Int = Random.nextInt(),
+    val x: Float = Random.nextFloat(),
+    val speed: Float = Random.nextFloat() * 2 + 1, // скорость падения
+    val size: Float = Random.nextFloat() * 8 + 4, // размер снежинки
+    val opacity: Float = Random.nextFloat() * 0.5f + 0.3f // прозрачность
+)
+
+@Composable
+fun SnowflakeItem(data: SnowflakeData) {
+    val infiniteTransition = rememberInfiniteTransition(label = "")
+    val yOffset by infiniteTransition.animateFloat(
+        initialValue = -50f,
+        targetValue = 1100f,
+        animationSpec = infiniteRepeatable(
+            animation = tween((5000 / data.speed).toInt(), easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = ""
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .offset(
+                x = (data.x * LocalContext.current.resources.displayMetrics.widthPixels).dp,
+                y = yOffset.dp
+            )
+    ) {
+        Text(
+            text = "❄",
+            fontSize = data.size.sp,
+            color = Color.White.copy(alpha = data.opacity)
+        )
+    }
+}
+
+@Composable
+fun ChristmasDecorations() {
+    // Ёлочные украшения в углах
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Левый верхний угол - звезда
+        Text(
+            text = "⭐",
+            fontSize = 24.sp,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+                .zIndex(5f)
+        )
+
+        // Правый верхний угол - новогодний шар
+        Text(
+            text = "🎄",
+            fontSize = 20.sp,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+                .zIndex(5f)
+        )
+
+        // Левый нижний угол - подарок
+        Text(
+            text = "🎁",
+            fontSize = 18.sp,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(16.dp)
+                .zIndex(5f)
+        )
+
+        // Правый нижний угол - свеча
+        Text(
+            text = "🕯️",
+            fontSize = 16.sp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .zIndex(5f)
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +137,9 @@ fun MangaListScreen(
     var showErrorDialog by remember { mutableStateOf(false) }
     val errorMessage by viewModel.errorFlow.collectAsState()
     // ✅ УБРАНО: isLoading больше не показывается
+
+    // Кэш для обложек
+    var coverCache by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     val categories = listOf("Лол", "Шот", "Классика")
     var selectedCategory by remember { mutableStateOf(categories.first()) }
@@ -86,6 +186,9 @@ fun MangaListScreen(
 
     // ================= ОСНОВНОЙ КОНТЕЙНЕР =================
     Box(modifier = Modifier.fillMaxSize()) {
+        // 🎄 Новогодние украшения
+        Snowflakes()
+        ChristmasDecorations()
 
         Column(modifier = Modifier.fillMaxSize()) {
 
@@ -112,15 +215,32 @@ fun MangaListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(8.dp)
-                            .clickable { onOpenLink(item.link) }
+                            .clickable {
+                                if (item.link.isNotBlank()) {
+                                    onOpenLink(item.link)
+                                }
+                            }
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(8.dp)
                         ) {
+                            val coverUrl = coverCache[item.link] ?: item.imageUrl
+
                             AsyncImage(
-                                model = item.imageUrl,
+                                model = if (coverUrl.isNotBlank()) coverUrl else {
+                                    // Если обложка не загружена, запускаем загрузку
+                                    LaunchedEffect(item.link) {
+                                        if (item.link.isNotBlank() && !coverCache.containsKey(item.link)) {
+                                            viewModel.loadCoverForManga(item) { loadedCover ->
+                                                coverCache = coverCache + (item.link to loadedCover)
+                                            }
+                                        }
+                                    }
+                                    // Пока загружается, показываем placeholder
+                                    null
+                                },
                                 contentDescription = null,
                                 modifier = Modifier.size(100.dp)
                             )
@@ -168,12 +288,12 @@ fun MangaListScreen(
                                         }
                                     }) {
                                         Icon(
-                                            imageVector =
-                                                if (favorites.any { it.link == item.link })
-                                                    Icons.Filled.Star
-                                                else
-                                                    Icons.Outlined.StarOutline,
-                                            contentDescription = null
+                                            imageVector = Icons.Filled.Star,
+                                            contentDescription = null,
+                                            tint = if (favorites.any { it.link == item.link })
+                                                Color(0xFFFFD700) // Золотой для избранных
+                                            else
+                                                Color.Gray // Серый для остальных
                                         )
                                     }
                                 }
@@ -212,7 +332,9 @@ fun MangaListScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
 
                     IconButton(
-                        onClick = { viewModel.prevPage() },
+                        onClick = {
+                            viewModel.prevPage()
+                        },
                         enabled = currentPageState > 1
                     ) {
                         Icon(
@@ -223,7 +345,9 @@ fun MangaListScreen(
                     }
 
                     IconButton(
-                        onClick = { viewModel.nextPage() },
+                        onClick = {
+                            viewModel.nextPage()
+                        },
                         enabled = hasNextPage
                     ) {
                         Icon(
