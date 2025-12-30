@@ -75,52 +75,6 @@ fun SnowflakeItem(data: SnowflakeData) {
     }
 }
 
-@Composable
-fun ChristmasDecorations() {
-    // Ёлочные украшения в углах
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Левый верхний угол - звезда
-        Text(
-            text = "⭐",
-            fontSize = 24.sp,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-                .zIndex(5f)
-        )
-
-        // Правый верхний угол - новогодний шар
-        Text(
-            text = "🎄",
-            fontSize = 20.sp,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .zIndex(5f)
-        )
-
-        // Левый нижний угол - подарок
-        Text(
-            text = "🎁",
-            fontSize = 18.sp,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(16.dp)
-                .zIndex(5f)
-        )
-
-        // Правый нижний угол - свеча
-        Text(
-            text = "🕯️",
-            fontSize = 16.sp,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(16.dp)
-                .zIndex(5f)
-        )
-    }
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MangaListScreen(
@@ -188,7 +142,6 @@ fun MangaListScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         // 🎄 Новогодние украшения
         Snowflakes()
-        ChristmasDecorations()
 
         Column(modifier = Modifier.fillMaxSize()) {
 
