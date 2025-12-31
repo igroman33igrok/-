@@ -1,13 +1,10 @@
 package com.example.shotacon
 
-import android.os.Bundle
+import android.app.Activity
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.app.Activity
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsControllerCompat
-import android.view.WindowManager
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -21,8 +18,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.*
@@ -30,52 +29,50 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import coil.request.CachePolicy
 import com.example.shotacon.datastore.UserPrefs
 import com.example.shotacon.ui.*
 import com.example.shotacon.ui.theme.ShotaconTheme
 import com.example.shotacon.viewmodel.MangaViewModel
 import com.example.shotacon.viewmodel.NavSharedViewModel
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import androidx.compose.material3.MaterialTheme
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.appCheck
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.initialize
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity(), ImageLoaderFactory {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Настройка поддержки темной темы для системной панели навигации
-        WindowCompat.setDecorFitsSystemWindows(window, true) // Включаем стандартное поведение
+        WindowCompat.setDecorFitsSystemWindows(window, true)
 
-        // Инициализация Firebase
         Firebase.initialize(this)
         Firebase.appCheck.installAppCheckProviderFactory(
             PlayIntegrityAppCheckProviderFactory.getInstance()
         )
 
         setContent {
-            MyApp(activity = this@MainActivity)
+            MyApp(activity = this)
         }
     }
 
-    // ⚡ Упрощенная конфигурация Coil для максимальной скорости
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.2) // 20% доступной памяти
+                    .maxSizePercent(0.2)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(256L * 1024 * 1024) // 256MB кэш
+                    .maxSizeBytes(256L * 1024 * 1024)
                     .build()
             }
             .build()
@@ -85,32 +82,29 @@ class MainActivity : ComponentActivity(), ImageLoaderFactory {
 @Composable
 fun MyApp(activity: Activity) {
     val context = LocalContext.current
-    val connectivityManager = remember {
+    val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    }
 
     var isOffline by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val activeNetwork = connectivityManager.activeNetwork
-        val networkCapabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-        isOffline = networkCapabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true
+        val network = connectivityManager.activeNetwork
+        val caps = connectivityManager.getNetworkCapabilities(network)
+        isOffline = caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true
     }
 
     if (isOffline) {
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("Нет подключения к интернету") },
-            text = { Text("Приложение не может работать без интернета.") },
+            title = { Text("Нет интернета") },
+            text = { Text("Приложение не может работать без подключения.") },
             confirmButton = {
                 TextButton(onClick = { isOffline = false }) {
                     Text("Продолжить")
                 }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    activity.finish()
-                }) {
+                TextButton(onClick = { activity.finish() }) {
                     Text("Выйти")
                 }
             }
@@ -129,7 +123,6 @@ fun AppEntryPoint(activity: Activity) {
     var disclaimerAccepted by remember { mutableStateOf(false) }
     var disclaimerChecked by remember { mutableStateOf(false) }
 
-    // Проверка принятия дисклеймера
     LaunchedEffect(Unit) {
         disclaimerAccepted = UserPrefs.isDisclaimerAccepted(activity).first()
         disclaimerChecked = true
@@ -137,194 +130,74 @@ fun AppEntryPoint(activity: Activity) {
 
     if (!disclaimerChecked) return
 
-    if (!disclaimerAccepted) {
-        DisclaimerScreen(context = activity) {
-            disclaimerAccepted = true
-        }
-        return
+    // Используем системную тему по умолчанию для экранов входа
+    var isDarkTheme by rememberSaveable { mutableStateOf(false) }
+    var winterTheme by rememberSaveable { mutableStateOf(false) }
+
+    // Загружаем сохраненные настройки темы, если пользователь уже входил
+    LaunchedEffect(Unit) {
+        isDarkTheme = UserPrefs.getDarkTheme(activity).first()
+        winterTheme = false // По умолчанию зимняя тема отключена
     }
 
-    // Продолжение обычной логики
+    // Обновляем темы при входе пользователя
     var loggedIn by remember { mutableStateOf(auth.currentUser != null) }
-    var isDarkTheme by remember { mutableStateOf(false) }
 
     LaunchedEffect(loggedIn) {
         if (loggedIn) {
-            val user = auth.currentUser
-            user?.let {
+            auth.currentUser?.let {
                 val doc = db.collection("users").document(it.uid).get().await()
                 isDarkTheme = doc.getBoolean("darkTheme") ?: false
+                winterTheme = doc.getBoolean("winterTheme") ?: false
             }
         }
     }
-
-    if (loggedIn) {
-        MainAppScreen(isDarkTheme) { newTheme ->
-            isDarkTheme = newTheme
-            auth.currentUser?.let {
-                scope.launch {
-                    db.collection("users").document(it.uid)
-                        .update("darkTheme", newTheme)
-                }
-            }
-        }
-    } else {
-        LoginScreen(
-            onSuccess = { loggedIn = true },
-            context = activity
-        )
-    }
-}
-
-@Composable
-fun MainAppScreen(
-    isDarkTheme: Boolean,
-    winterTheme: Boolean,
-    onThemeChanged: (Boolean) -> Unit
-) {
-    val navController = rememberNavController()
-    val navSharedViewModel: NavSharedViewModel = viewModel()
-    // ✅ Создаём ОДИН ViewModel для всего NavHost
-    val mangaViewModel: MangaViewModel = viewModel()
-
-    // ✅ Определяем текущий экран
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
-    val showPageControlBar = currentRoute == "manga"
 
     ShotaconTheme(
         darkTheme = isDarkTheme,
         winterTheme = winterTheme
     ) {
-        // Настройка системной панели навигации под тему
-        val context = LocalContext.current
-        LaunchedEffect(isDarkTheme) {
-            val activity = context as? Activity
-            if (activity != null) {
-                val window = activity.window
-
-                WindowCompat.getInsetsController(window, window.decorView).apply {
-                    isAppearanceLightNavigationBars = !isDarkTheme
-                    isAppearanceLightStatusBars = !isDarkTheme
-                }
-
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    window.isNavigationBarContrastEnforced = false
-                    window.isStatusBarContrastEnforced = false
-                }
-
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    window.decorView.systemUiVisibility = if (isDarkTheme) {
-                        window.decorView.systemUiVisibility and android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
-                    } else {
-                        window.decorView.systemUiVisibility or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-                    }
-                }
+        if (!disclaimerAccepted) {
+            DisclaimerScreen(activity) {
+                disclaimerAccepted = true
             }
+            return@ShotaconTheme
         }
-        Scaffold(
-            contentWindowInsets = WindowInsets.systemBars,
-            bottomBar = {
-                Column {
 
-                    // ✅ Показываем панель только на экране манги
-                    if (showPageControlBar) {
-                        PageControlBar(viewModel = mangaViewModel)
+        if (loggedIn) {
+            MainAppScreen(
+                isDarkTheme = isDarkTheme,
+                winterTheme = winterTheme,
+                onThemeChanged = { value ->
+                    isDarkTheme = value
+                    auth.currentUser?.let {
+                        scope.launch {
+                            db.collection("users").document(it.uid)
+                                .update("darkTheme", value)
+                        }
                     }
-
-                    // 🔽 ОСНОВНАЯ НАВИГАЦИЯ
-                    NavigationBar {
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.Home, null) },
-                            label = { Text("Манга") },
-                            selected = currentDestination(navController) == "manga",
-                            onClick = { navController.navigate("manga") { launchSingleTop = true } }
-                        )
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.Star, null) },
-                            label = { Text("Избранное") },
-                            selected = currentDestination(navController) == "favorites",
-                            onClick = { navController.navigate("favorites") { launchSingleTop = true } }
-                        )
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.Person, null) },
-                            label = { Text("Профиль") },
-                            selected = currentDestination(navController) == "profile",
-                            onClick = { navController.navigate("profile") { launchSingleTop = true } }
-                        )
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.Settings, null) },
-                            label = { Text("Настройки") },
-                            selected = currentDestination(navController) == "settings",
-                            onClick = { navController.navigate("settings") { launchSingleTop = true } }
-                        )
+                },
+                onWinterThemeChanged = { value ->
+                    winterTheme = value
+                    auth.currentUser?.let {
+                        scope.launch {
+                            db.collection("users").document(it.uid)
+                                .update("winterTheme", value)
+                        }
                     }
                 }
-            }
-        ) { innerPadding ->
-            NavHost(
-                navController = navController,
-                startDestination = "splash", // 👈 запускаем со сплэша
-                modifier = Modifier.padding(innerPadding)
-            ) {
-                // --- Splash ---
-                composable("splash") {
-                    SplashScreen(navController)
-                }
-
-                // --- Главный экран ---
-                composable("manga") {
-                    MangaListScreen(
-                        onOpenLink = { link ->
-                            // Кодируем URL для безопасной передачи в параметрах
-                            val encodedUrl = java.net.URLEncoder.encode(link, "UTF-8")
-                            navController.navigate("reader/$encodedUrl")
-                        },
-                        viewModel = mangaViewModel  // ✅ Передаём тот же ViewModel
-                    )
-                }
-
-                // --- Избранное ---
-                composable("favorites") {
-                    FavoriteScreen(
-                        onOpenLink = { link ->
-                            val encodedUrl = java.net.URLEncoder.encode(link, "UTF-8")
-                            navController.navigate("reader/$encodedUrl")
-                        }
-                    )
-                }
-
-                // --- Профиль ---
-                composable("profile") {
-                    ProfileScreen(
-                        onFavoritesClick = {
-                            navController.navigate("favorites")
-                        }
-                    )
-                }
-
-                // --- Настройки ---
-                composable("settings") {
-                    SettingsScreen(isDarkTheme, onThemeChanged)
-                }
-
-                // --- Manga Reader ---
-                composable("reader/{url}") {
-                    val encoded = it.arguments?.getString("url") ?: ""
-                    val link = java.net.URLDecoder.decode(encoded, "UTF-8")
-                    MangaReadScreen(link)
-                }
-
-            }
+            )
+        } else {
+            LoginScreen(
+                onSuccess = { loggedIn = true },
+                context = activity
+            )
         }
     }
 }
 
 @Composable
 fun currentDestination(navController: NavController): String? {
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    return navBackStackEntry?.destination?.route?.split("/")?.firstOrNull()
+    val entry by navController.currentBackStackEntryAsState()
+    return entry?.destination?.route?.substringBefore("/")
 }

@@ -22,7 +22,9 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     isDarkTheme: Boolean,
     onThemeChanged: (Boolean) -> Unit,
-    viewModel: SettingsViewModel = viewModel() // ✅ Используем ViewModel
+    viewModel: SettingsViewModel = viewModel(), // ✅ Используем ViewModel
+    winterTheme: Boolean,
+    onWinterThemeChanged: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -69,6 +71,22 @@ fun SettingsScreen(
                 Switch(
                     checked = isDarkTheme,
                     onCheckedChange = { onThemeChanged(it) }
+                )
+            }
+
+            var winterTheme by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("❄ Зимний акцент")
+                Switch(
+                    checked = winterTheme,
+                    onCheckedChange = { winterTheme = it }
                 )
             }
 

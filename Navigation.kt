@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.*
 import com.example.shotacon.ui.*
+import com.example.shotacon.ui.theme.ShotaconTheme
 import com.example.shotacon.viewmodel.MangaViewModel
 import com.example.shotacon.viewmodel.NavSharedViewModel
 import java.net.URLDecoder
@@ -12,12 +13,18 @@ import java.net.URLEncoder
 @Composable
 fun Navigation(
     isDarkTheme: Boolean,
-    onThemeChanged: (Boolean) -> Unit
+    onThemeChanged: (Boolean) -> Unit,
+    winterTheme: Boolean,
+    onWinterThemeChanged: (Boolean) -> Unit
 ) {
-    val navController = rememberNavController()
-    val navSharedViewModel: NavSharedViewModel = viewModel()
+    ShotaconTheme(
+        darkTheme = isDarkTheme,
+        winterTheme = winterTheme
+    ) {
+        val navController = rememberNavController()
+        val navSharedViewModel: NavSharedViewModel = viewModel()
 
-    NavHost(
+        NavHost(
         navController = navController,
         startDestination = "splash"
     ) {
@@ -65,7 +72,9 @@ fun Navigation(
         composable("settings") {
             SettingsScreen(
                 isDarkTheme = isDarkTheme,
-                onThemeChanged = onThemeChanged
+                onThemeChanged = onThemeChanged,
+                winterTheme = winterTheme,
+                onWinterThemeChanged = onWinterThemeChanged
             )
         }
 
@@ -81,5 +90,6 @@ fun Navigation(
                 viewModel = mangaViewModel
             )
         }
+    }
     }
 }
