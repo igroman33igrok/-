@@ -33,6 +33,7 @@ import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import com.example.shotacon.datastore.UserPrefs
 import com.example.shotacon.ui.*
+import com.example.shotacon.ui.theme.ShotaconTheme
 import com.example.shotacon.viewmodel.MangaViewModel
 import com.example.shotacon.viewmodel.NavSharedViewModel
 import com.google.firebase.auth.FirebaseAuth
@@ -178,6 +179,7 @@ fun AppEntryPoint(activity: Activity) {
 @Composable
 fun MainAppScreen(
     isDarkTheme: Boolean,
+    winterTheme: Boolean,
     onThemeChanged: (Boolean) -> Unit
 ) {
     val navController = rememberNavController()
@@ -190,8 +192,9 @@ fun MainAppScreen(
     val currentRoute = navBackStackEntry?.destination?.route
     val showPageControlBar = currentRoute == "manga"
 
-    MaterialTheme(
-        colorScheme = if (isDarkTheme) darkColorScheme() else lightColorScheme()
+    ShotaconTheme(
+        darkTheme = isDarkTheme,
+        winterTheme = winterTheme
     ) {
         // Настройка системной панели навигации под тему
         val context = LocalContext.current
